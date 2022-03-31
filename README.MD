@@ -8,8 +8,8 @@
 <h4 align="center">Orangebeard listener for <a href="https://github.com/postmanlabs/newman" target="_blank" rel="noopener">Newman</a> (Postman CLI).)</h4>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@orangebeard-io/postman-listener">
-    <img src="https://img.shields.io/npm/v/@orangebeard-io/postman-listener.svg?style=flat-square"
+  <a href="https://www.npmjs.com/package/@orangebeard-io/newman-reporter-orangebeard">
+    <img src="https://img.shields.io/npm/v/@orangebeard-io/newman-reporter-orangebeard.svg?style=flat-square"
       alt="NPM Version" />
   </a>
   <a href="https://github.com/orangebeard-io/postman-listener/actions">
