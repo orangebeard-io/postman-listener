@@ -1,0 +1,40 @@
+{
+  "name": "@orangebeard-io/newman-reporter-orangebeard",
+  "version": "1.0.0",
+  "description": "A run time test run listener for Postman (Newman)",
+  "main": "index",
+  "scripts": {
+    "lint": "eslint \"./**/*.js\" --quiet",
+    "format:js": "npm run lint -- --fix",
+    "format:md": "prettier --write README.md",
+    "format": "npm run format:js && npm run format:md",
+    "get-version": "echo $npm_package_version",
+    "update-version": "release-it --ci --no-git --no-npm.publish",
+    "create-changelog": "auto-changelog --template changelog-template.hbs --starting-version v$npm_package_version"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/orangebeard-io/postman-listener.git"
+  },
+  "author": "Team Soju",
+  "license": "AGPL-3.0",
+  "bugs": {
+    "url": "https://github.com/orangebeard-io/postman-listener/issues"
+  },
+  "homepage": "https://github.com/orangebeard-io/postman-listener#readme",
+  "dependencies": {
+    "@orangebeard-io/javascript-client": "1.0.9",
+    "xml-formatter": "2.6.1"
+  },
+  "devDependencies": {
+    "auto-changelog": "2.4.0",
+    "eslint": "8.12.0",
+    "eslint-config-airbnb-base": "15.0.0",
+    "eslint-config-prettier": "8.5.0",
+    "eslint-plugin-import": "2.25.4",
+    "eslint-plugin-prettier": "4.0.0",
+    "jest": "27.5.1",
+    "prettier": "^2.6.1",
+    "release-it": "14.13.1"
+  }
+}
