@@ -47,37 +47,64 @@ Create orangebeard.json (in your collection's folder (or above))
 	"endpoint": "https://XXX.orangebeard.app",
 	"accessToken": "00000000-0000-0000-0000-00000000",
 	"project": "my_project_name",
-	"testset": "My Test Set Name",
-	"listenerMode": "DEFAULT", 
-	"restClientConfig": {
-		"timeout": 0
-	}
+	"testset": "My Test Set Name"
 }
-``` 
+```
 
 ### Running
 
 From the command line:
+
 ```shell
 newman run ./postman-collection.json -r @orangebeard-io/orangebeard
 ```
 
-Or programmatically:
+Or configure using the CLI (without orangebeard.json):
 
 ```shell
-const newman = require("newman");
+newman run ./collection.json -r @orangebeard-io/orangebeard \
+--reporter-@orangebeard-io/orangebeard-endpoint=https://my.orangebeard.app \
+--reporter-@orangebeard-io/orangebeard-token=00000000-0000-0000-00000000 \
+--reporter-@orangebeard-io/orangebeard-testset=testset_name \
+--reporter-@orangebeard-io/orangebeard-project=project_name \
+--reporter-@orangebeard-io/orangebeard-description=description \
+--reporter-@orangebeard-io/orangebeard-attributes=key:value;secondkey:secondvalue;singleTag
+```
+Note: Description and attributes are optional.
+
+Or programmatically:
+
+```js
+const newman = require('newman');
 
 newman.run(
-    {
-        collection: "./postman-collection.json",
-        reporters: "@orangebeard-io/orangebeard",
+  {
+    collection: './collection.json',
+    reporters: '@orangebeard-io/orangebeard',
+    reporter: {
+      '@orangebeard-io/orangebeard': {
+        endpoint: 'https://my.orangebeard.app',
+        token: '00000000-0000-0000-0000-000000000000',
+        testset: 'testset_name',
+        project: 'project_name',
+        description: 'description',
+        attributes: [
+          {
+            key: 'key',
+            value: 'val',
+          },
+          {
+            value: 'singleTag',
+          },
+        ],
+      },
     },
-    function(err) {
-        if (err) {
-            throw err;
-        }
-        console.log("collection run complete!");
+  },
+  function (err) {
+    if (err) {
+      throw err;
     }
+    console.log('collection run complete!');
+  },
 );
 ```
-

@@ -24,6 +24,7 @@
   "homepage": "https://github.com/orangebeard-io/postman-listener#readme",
   "dependencies": {
     "@orangebeard-io/javascript-client": "1.0.9",
+    "newman": "^5.3.2",
     "xml-formatter": "2.6.1"
   },
   "devDependencies": {
