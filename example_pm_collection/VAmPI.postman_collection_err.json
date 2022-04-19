@@ -1,0 +1,192 @@
+{
+	"info": {
+		"_postman_id": "cf120ff2-916e-4232-94d7-863930b656ae",
+		"name": "VAmPI Copy",
+		"description": "OpenAPI v3 specs for VAmPI",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "User Generic",
+			"item": [
+				{
+					"name": "Register new user",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"var jsonData = pm.response.json();",
+									"var schema = {",
+									"  \"$schema\": \"http://json-schema.org/draft-04/schema#\",",
+									"  \"type\": \"object\",",
+									"  \"required\": [",
+									"    \"status\",",
+									"    \"message\"",
+									"  ]",
+									"}",
+									"pm.test('Response bevat alle verplichte velden', function() {",
+									"  pm.expect(tv4.validate(jsonData, schema)).to.be.true;",
+									"});",
+									"",
+									"pm.test(\"Status: fail (gebruiker bestaat al)' + ' (met juiste foutcode)\", function () {",
+									"    pm.expect(jsonData.status).to.eql(\"pass\");",
+									"    pm.expect(jsonData.message).to.eql(\"User already exists. Please Log in.\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"<string>\",\n    \"password\": \"<string>\",\n    \"email\": \"<string>\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/users/v1/register",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"users",
+								"v1",
+								"register"
+							]
+						},
+						"description": "Register new user"
+					},
+					"response": [
+						{
+							"name": "Sucessfully created user",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"username\": \"<string>\",\n    \"password\": \"<string>\",\n    \"email\": \"<string>\"\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/users/v1/register",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"users",
+										"v1",
+										"register"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n \"message\": \"exercitation dolor aliqua\",\n \"status\": \"fail\"\n}"
+						},
+						{
+							"name": "Invalid request",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"username\": \"<string>\",\n    \"password\": \"<string>\",\n    \"email\": \"<string>\"\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/users/v1/register",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"users",
+										"v1",
+										"register"
+									]
+								}
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "text",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "text/plain"
+								}
+							],
+							"cookie": [],
+							"body": ""
+						}
+					]
+				}
+			],
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:5000"
+		},
+		{
+			"key": "auth_token",
+			"value": ""
+		}
+	]
+}
