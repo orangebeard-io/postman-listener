@@ -1,10 +1,10 @@
 {
   "name": "@orangebeard-io/newman-reporter-orangebeard",
-  "version": "1.0.4",
+  "version": "2.0.0-S07",
   "description": "A run time test run listener for Postman (Newman)",
-  "main": "index",
+  "main": "index.js",
   "scripts": {
-    "lint": "eslint \"./**/*.js\" --quiet",
+    "lint": "eslint \"./**/*.js\" --fix --quiet",
     "format:js": "npm run lint -- --fix",
     "format:md": "prettier --write README.md",
     "format": "npm run format:js && npm run format:md",
@@ -23,8 +23,9 @@
   },
   "homepage": "https://github.com/orangebeard-io/postman-listener#readme",
   "dependencies": {
-    "@orangebeard-io/javascript-client": "1.0.9",
-    "newman": "^5.3.2",
+    "@js-joda/core": "^5.6.1",
+    "@orangebeard-io/javascript-client": "file:../javascript-client",
+    "newman": "^6.1.0",
     "xml-formatter": "2.6.1"
   },
   "devDependencies": {
@@ -36,6 +37,6 @@
     "eslint-plugin-prettier": "4.0.0",
     "jest": "27.5.1",
     "prettier": "^2.6.1",
-    "release-it": "14.13.1"
+    "release-it": "^17.0.1"
   }
 }

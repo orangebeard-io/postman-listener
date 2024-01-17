@@ -1,6 +1,9 @@
 {
   "extends": ["airbnb-base", "prettier"],
   "plugins": ["prettier"],
+  "parserOptions": {
+    "ecmaVersion": 2020
+  },
   "globals": {
     "expectAsync": true
   },
@@ -12,6 +15,7 @@
   "rules": {
     "prettier/prettier": 2,
     "no-unused-expressions": ["error", { "allowTernary": true, "allowShortCircuit": true }],
+    "no-plusplus": "off",
     "import/prefer-default-export": 0,
     "import/no-extraneous-dependencies": 0,
     "no-restricted-globals": 0,

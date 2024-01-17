@@ -1,6 +1,6 @@
 {
 	"info": {
-		"_postman_id": "fb0695e2-ebc2-4b8b-a09e-ca2bdb93e8dd",
+		"_postman_id": "a79138f7-f06a-4a0f-9c3f-2849c686450a",
 		"name": "VAmPI",
 		"description": "OpenAPI v3 specs for VAmPI",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -11,6 +11,37 @@
 			"item": [
 				{
 					"name": "Register new user",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {\r",
+									"    pm.response.to.have.status(200);\r",
+									"});\r",
+									"\r",
+									"var jsonData = pm.response.json();\r",
+									"var schema = {\r",
+									"  \"$schema\": \"http://json-schema.org/draft-04/schema#\",\r",
+									"  \"type\": \"object\",\r",
+									"  \"required\": [\r",
+									"    \"status\",\r",
+									"    \"message\"\r",
+									"  ]\r",
+									"}\r",
+									"pm.test('Response bevat alle verplichte velden', function() {\r",
+									"  pm.expect(tv4.validate(jsonData, schema)).to.be.true;\r",
+									"});\r",
+									"\r",
+									"pm.test('Status: fail (gebruiker bestaat al)' + ' (met juiste foutcode)', function () {\r",
+									"    pm.expect(jsonData.status).to.eql(\"success\");\r",
+									"    pm.expect(jsonData.message).to.eql(\"User already exists. Please Log in.\");\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -1272,7 +1303,7 @@
 						"exec": [
 							"pm.test(\"Check message\", function () {\r",
 							"    var jsonData = pm.response.json();\r",
-							"    pm.expect(jsonData.message).to.eql(\"VAmPI the very Vulnerable API\");\r",
+							"    pm.expect(jsonData.message).to.eql(\"VAmPI the Vulnerable API\");\r",
 							"});\r",
 							"pm.test(\"Response time is less than 200ms\", function () {\r",
 							"    pm.expect(pm.response.responseTime).to.be.below(200);\r",
