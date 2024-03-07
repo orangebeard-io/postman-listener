@@ -1,6 +1,6 @@
 {
   "name": "@orangebeard-io/newman-reporter-orangebeard",
-  "version": "2.0.0-S07",
+  "version": "2.0.0",
   "description": "A run time test run listener for Postman (Newman)",
   "main": "index.js",
   "scripts": {
