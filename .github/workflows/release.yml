@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
       - name: Cache node modules
         uses: actions/cache@v4
         with:
@@ -48,7 +48,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
       - name: Cache node modules
         uses: actions/cache@v4
         with:
@@ -61,7 +61,7 @@ jobs:
       - name: Create CHANGELOG.md
         run: npm run create-changelog
       - name: Upload changelog as artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: changelog
           path: CHANGELOG.md
@@ -93,7 +93,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
           registry-url: 'https://registry.npmjs.org'
       - name: Cache node modules
         uses: actions/cache@v4
@@ -111,7 +111,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
           registry-url: 'https://npm.pkg.github.com'
           scope: '@orangebeard-io'
   update-version:
@@ -127,7 +127,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
       - name: Cache node modules
         uses: actions/cache@v4
         with:
