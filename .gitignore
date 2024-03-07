@@ -8,3 +8,8 @@ node_modules/
 **/orangebeard.json
 .vscode
 *.tgz
+
+/example_pm_collection
+example_pm_collection/orangebeard.json.off
+example_pm_collection/VAmPI.postman_collection.json
+package-lock.json
