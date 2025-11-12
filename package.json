@@ -25,6 +25,7 @@
   "dependencies": {
     "@js-joda/core": "^5.6.1",
     "@orangebeard-io/javascript-client": "^2.0.8",
+    "lodash": "^4.17.21",
     "newman": "^6.1.0",
     "xml-formatter": "2.6.1"
   },
@@ -37,6 +38,6 @@
     "eslint-plugin-prettier": "4.0.0",
     "jest": "27.5.1",
     "prettier": "^2.6.1",
-    "release-it": "^17.0.1"
+    "release-it": "^19.0.1"
   }
 }
