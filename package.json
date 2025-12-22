@@ -3,6 +3,9 @@
   "version": "2.0.2",
   "description": "A run time test run listener for Postman (Newman)",
   "main": "index.js",
+  "bin": {
+    "postman-cli-to-orangebeard": "./bin/postmanCliToOrangebeard.js"
+  },
   "scripts": {
     "lint": "eslint \"./**/*.js\" --fix --quiet",
     "format:js": "npm run lint -- --fix",
@@ -10,7 +13,8 @@
     "format": "npm run format:js && npm run format:md",
     "get-version": "echo $npm_package_version",
     "update-version": "release-it --ci --no-git --no-npm.publish",
-    "create-changelog": "auto-changelog --template changelog-template.hbs --starting-version v$npm_package_version"
+    "create-changelog": "auto-changelog --template changelog-template.hbs --starting-version v$npm_package_version",
+    "report:postman-cli-json": "node ./bin/postmanCliToOrangebeard.js"
   },
   "repository": {
     "type": "git",

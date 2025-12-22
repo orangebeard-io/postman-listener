@@ -108,3 +108,41 @@ newman.run(
   },
 );
 ```
+
+### Using Postman CLI JSON reports
+
+If you use the Postman CLI with its JSON reporter, you can import those JSON reports into Orangebeard using the CLI utility that ships with this package.
+
+#### 1. Generate a JSON report with Postman CLI
+
+From your API project, run the Postman CLI with JSON output enabled (example):
+
+```shell
+postman collection run ./VAmPI.postman_collection.json \
+  --reporters json \
+  --reporter-json-export ./postman-cli-reports/VAmPI-report.json
+```
+
+This produces a JSON file containing a `run` object with `executions`, similar to the examples under `example_pm_collection/postman-cli-reports/` in this repository.
+
+#### 2. Report the JSON run to Orangebeard
+
+From this package's directory (with your Orangebeard configuration already set up, e.g. via `orangebeard.json` or environment):
+
+```shell
+npm run report:postman-cli-json -- ./example_pm_collection/postman-cli-reports/VAmPI-report.json
+```
+
+Or, if the package is installed globally or as a project dependency:
+
+```shell
+postman-cli-to-orangebeard ./example_pm_collection/postman-cli-reports/VAmPI-report.json
+```
+
+The utility will:
+
+- Create an Orangebeard test run using the same automatic configuration logic as the Newman reporter.
+- Create one Orangebeard test per request in the JSON report.
+- Log request and response metadata in Markdown, including headers and JSON/XML bodies in fenced code blocks.
+- Map Postman tests/assertions to Orangebeard steps, attaching error messages and stack traces when they fail.
+- Use the timing information from the report to reconstruct start/end timestamps per test and for the entire run.
