@@ -120,13 +120,123 @@ function getBodyStringFromResponse(res) {
   return '';
 }
 
+function buildItemHierarchy(collection) {
+  const itemMap = new Map();
+  
+  function traverse(items, parentPath = []) {
+    if (!Array.isArray(items)) return;
+    
+    items.forEach((item) => {
+      const itemName = item.name || 'Unnamed';
+      
+      if (Array.isArray(item.item) && item.item.length > 0) {
+        const currentPath = [...parentPath, itemName];
+        itemMap.set(item.id, { path: currentPath, isFolder: true });
+        traverse(item.item, currentPath); // Recurse into folder items
+      } else {
+        itemMap.set(item.id, { path: parentPath, isFolder: false });
+      }
+    });
+  }
+  
+  if (collection && collection.item) {
+    traverse(collection.item);
+  }
+  
+  return itemMap;
+}
+
+function getOrCreateSuiteForPath(client, testRunUUID, path, suiteCache) {
+  if (path.length === 0) return null;
+  
+  const pathKey = path.join('/');
+  
+  if (suiteCache.has(pathKey)) {
+    return suiteCache.get(pathKey);
+  }
+  
+  // Get or create parent suite first
+  const parentPath = path.slice(0, -1);
+  const parentSuiteUUID = parentPath.length > 0 
+    ? getOrCreateSuiteForPath(client, testRunUUID, parentPath, suiteCache)
+    : null;
+  
+  // Create this suite
+  const suiteUUIDs = client.startSuite({
+    testRunUUID,
+    parentSuiteUUID,
+    suiteNames: [path[path.length - 1]],
+  });
+  
+  const suiteUUID = Array.isArray(suiteUUIDs) ? suiteUUIDs[0] : suiteUUIDs;
+  suiteCache.set(pathKey, suiteUUID);
+  
+  return suiteUUID;
+}
+
+function logError(client, testRunUUID, testUUID, error, logTime, stepUUID = undefined) {
+  if (!error) return;
+
+  let message = '';
+  
+  // Handle different error formats
+  if (error.type && error.name) {
+    message = `${error.type}: ${error.name}`;
+    if (error.message) {
+      message += ` - ${error.message}`;
+    }
+  } else if (error.message) {
+    message = error.message;
+  } else {
+    message = 'Unknown error';
+  }
+
+  // Add error source context if available
+  if (error.source) {
+    message = `**${error.source}**\n\n${message}`;
+  }
+
+  // Add error code/errno if available
+  if (error.code) {
+    message = `**${error.code}${error.errno ? ` (${error.errno})**` : ''}\n\n${message}`;
+  }
+
+  client.log({
+    testRunUUID,
+    testUUID,
+    stepUUID,
+    logTime: logTime.toString(),
+    message,
+    logLevel: 'ERROR',
+    logFormat: 'MARKDOWN',
+  });
+}
+
 function main() {
-  const reportPath = process.argv[2];
+  const args = process.argv.slice(2);
+  const reportPath = args[0];
 
   if (!reportPath) {
-    // Keep usage simple; extra options can be added later if needed.
-    console.error('Usage: postman-cli-to-orangebeard <path-to-report.json>');
+    console.error('Usage: postman-cli-to-orangebeard <path-to-report.json> [--endpoint <url>] [--token <token>] [--testset <name>] [--project <name>] [--attributes <attrs>] [--description <desc>]');
     process.exit(1);
+  }
+
+  // Parse command-line arguments into a reporterConfig object
+  const reporterConfig = {};
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--endpoint' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardEndpoint = args[++i];
+    } else if (args[i] === '--token' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardToken = args[++i];
+    } else if (args[i] === '--testset' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardTestset = args[++i];
+    } else if (args[i] === '--project' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardProject = args[++i];
+    } else if (args[i] === '--attributes' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardAttributes = args[++i];
+    } else if (args[i] === '--description' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardDescription = args[++i];
+    }
   }
 
   const absolutePath = path.resolve(process.cwd(), reportPath);
@@ -140,7 +250,13 @@ function main() {
     process.exit(1);
   }
 
-  const client = new OrangebeardAsyncV3Client();
+  const config = Object.keys(reporterConfig).length > 0 
+    ? utils.getOrangebeardParameters(reporterConfig)
+    : {};
+  
+  const client = Object.keys(config).length > 0
+    ? new OrangebeardAsyncV3Client(config)
+    : new OrangebeardAsyncV3Client();
   const orangebeardConfig = client.config || {};
 
   const meta = run.meta || {};
@@ -165,13 +281,20 @@ function main() {
     (run.collection && run.collection.info && run.collection.info.name) ||
     'Postman CLI run';
 
-  const suiteUUIDs = client.startSuite({
+  // Build item hierarchy if collection structure is available
+  const itemMap = buildItemHierarchy(json.collection);
+  const suiteCache = new Map();
+  
+  // Create root suite
+  const rootSuiteUUIDs = client.startSuite({
     testRunUUID,
     parentSuiteUUID: null,
     suiteNames: [suiteName],
   });
 
-  const suiteUUID = Array.isArray(suiteUUIDs) ? suiteUUIDs[0] : suiteUUIDs;
+  const rootSuiteUUID = Array.isArray(rootSuiteUUIDs) ? rootSuiteUUIDs[0] : rootSuiteUUIDs;
+  
+  suiteCache.set('', rootSuiteUUID);
 
   executions.forEach((execution) => {
     const request = getRequestFromExecution(execution);
@@ -182,12 +305,17 @@ function main() {
       (execution.item && execution.item.name) ||
       'Unnamed request';
 
-    const durationMs = getDurationMs(execution);
-
-    const testAttributes = [];
-    if (request && request.method) {
-      testAttributes.push({ key: 'Method', value: request.method });
+    let suiteUUID = rootSuiteUUID;
+    
+    const itemId = execution.item && execution.item.id;
+    if (itemId && itemMap.has(itemId)) {
+      const itemInfo = itemMap.get(itemId);
+      if (itemInfo.path.length > 0) {
+        suiteUUID = getOrCreateSuiteForPath(client, testRunUUID, itemInfo.path, suiteCache);
+      }
     }
+
+    const durationMs = getDurationMs(execution);
 
     const testStartEpochMs = runStartEpochMs + currentOffsetMs;
     const testEndEpochMs = testStartEpochMs + durationMs;
@@ -207,7 +335,6 @@ function main() {
         (request && request.description && request.description.content) ||
         (request && request.description) ||
         undefined,
-      attributes: testAttributes,
       startTime: testStart.toString(),
     });
 
@@ -323,24 +450,20 @@ function main() {
         stepStatus = TestStatus.FAILED;
         testStatus = TestStatus.FAILED;
 
-        let message = (error && error.message) || 'Assertion failed';
-        const stackLines = error && Array.isArray(error.stacktrace) ? error.stacktrace : [];
-
-        if (error && error.stack) {
-          message += `\n${error.stack}`;
-        } else if (stackLines.length) {
-          message += `\n${stackLines.map((l) => `    ${l}`).join('\n')}`;
+        if (error) {
+          logError(client, testRunUUID, testUUID, error, stepEnd, stepUUID);
+        } else {
+          // If no error object but status is failed, log a generic failure message
+          client.log({
+            testRunUUID,
+            testUUID,
+            stepUUID,
+            logTime: stepEnd.toString(),
+            message: 'Assertion failed',
+            logLevel: 'ERROR',
+            logFormat: 'MARKDOWN',
+          });
         }
-
-        client.log({
-          testRunUUID,
-          testUUID,
-          stepUUID,
-          logTime: stepEnd.toString(),
-          message,
-          logLevel: 'ERROR',
-          logFormat: 'MARKDOWN',
-        });
       }
 
       client.finishStep(stepUUID, {
@@ -418,41 +541,33 @@ function main() {
       });
     }
 
-    // Top-level execution error, if any
-    if (execution.error) {
+    // Handle Newman-style requestError (network/connection errors)
+    if (execution.requestError) {
       testStatus = TestStatus.FAILED;
-      const err = execution.error;
-      let message = err.message || 'Request execution failed';
+      logError(client, testRunUUID, testUUID, execution.requestError, testEnd);
+    }
 
-      if (err.stack) {
-        message += `\n${err.stack}`;
-      }
-
-      client.log({
-        testRunUUID,
-        testUUID,
-        logTime: testEnd.toString(),
-        message,
-        logLevel: 'ERROR',
-        logFormat: 'MARKDOWN',
+    // Handle Newman-style testScript errors (script execution errors)
+    if (Array.isArray(execution.testScript)) {
+      execution.testScript.forEach((scriptResult) => {
+        if (scriptResult.error) {
+          testStatus = TestStatus.FAILED;
+          logError(client, testRunUUID, testUUID, scriptResult.error, testEnd);
+        }
       });
     }
 
+    // Top-level execution error, if any
+    if (execution.error) {
+      testStatus = TestStatus.FAILED;
+      logError(client, testRunUUID, testUUID, execution.error, testEnd);
+    }
+
+    // Handle errors array (from Postman CLI JSON format)
     if (Array.isArray(execution.errors) && execution.errors.length) {
       testStatus = TestStatus.FAILED;
       execution.errors.forEach((err) => {
-        let message = (err && err.message) || 'Request execution error';
-        if (err && err.stack) {
-          message += `\n${err.stack}`;
-        }
-        client.log({
-          testRunUUID,
-          testUUID,
-          logTime: testEnd.toString(),
-          message,
-          logLevel: 'ERROR',
-          logFormat: 'MARKDOWN',
-        });
+        logError(client, testRunUUID, testUUID, err, testEnd);
       });
     }
 

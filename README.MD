@@ -139,6 +139,17 @@ Or, if the package is installed globally or as a project dependency:
 postman-cli-to-orangebeard ./example_pm_collection/postman-cli-reports/VAmPI-report.json
 ```
 
+The utility also works with the following arguments:
+```shell
+postman-cli-to-orangebeard ./example_pm_collection/postman-cli-reports/VAmPI-report.json \
+--endpoint=https://my.orangebeard.app \
+--token=00000000-0000-0000-00000000 \
+--testset=testset_name \
+--project=project_name \
+--description=description \
+--attributes=key:value;secondkey:secondvalue;singleTag
+```
+
 The utility will:
 
 - Create an Orangebeard test run using the same automatic configuration logic as the Newman reporter.
