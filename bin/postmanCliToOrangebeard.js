@@ -174,6 +174,18 @@ function getOrCreateSuiteForPath(client, testRunUUID, path, suiteCache) {
   return suiteUUID;
 }
 
+function parseProjects(reporterConfig) {
+  if (!Object.keys(reporterConfig).length) {
+    return [''];
+  }
+  const projectString = reporterConfig.orangebeardIoOrangebeardProject;
+  if (!projectString) {
+    return [''];
+  }
+  const projects = projectString.split(';').map(p => p.trim()).filter(p => p.length > 0);
+  return projects.length > 0 ? projects : [''];
+}
+
 function logError(client, testRunUUID, testUUID, error, logTime, stepUUID = undefined) {
   if (!error) return;
 
@@ -250,14 +262,18 @@ function main() {
     process.exit(1);
   }
 
-  const config = Object.keys(reporterConfig).length > 0 
-    ? utils.getOrangebeardParameters(reporterConfig)
-    : {};
+  const projects = parseProjects(reporterConfig);
   
-  const client = Object.keys(config).length > 0
-    ? new OrangebeardAsyncV3Client(config)
-    : new OrangebeardAsyncV3Client();
-  const orangebeardConfig = client.config || {};
+  const clients = projects.map(project => {
+    const config = !Object.keys(reporterConfig).length
+      ? {}
+      : { ...utils.getOrangebeardParameters(reporterConfig), project };
+    return !Object.keys(config).length
+      ? new OrangebeardAsyncV3Client()
+      : new OrangebeardAsyncV3Client(config);
+  });
+  
+  const orangebeardConfig = clients[0].config || {};
 
   const meta = run.meta || {};
 
@@ -273,7 +289,7 @@ function main() {
   const startTestRunPayload = utils.getStartTestRun(orangebeardConfig);
   startTestRunPayload.startTime = runStartZoned.toString();
 
-  const testRunUUID = client.startTestRun(startTestRunPayload);
+  const testRunUUIDs = clients.map(client => client.startTestRun(startTestRunPayload));
 
   const suiteName =
     meta.collectionName ||
@@ -283,18 +299,22 @@ function main() {
 
   // Build item hierarchy if collection structure is available
   const itemMap = buildItemHierarchy(json.collection);
-  const suiteCache = new Map();
+  const suiteCaches = clients.map(() => new Map());
   
-  // Create root suite
-  const rootSuiteUUIDs = client.startSuite({
-    testRunUUID,
-    parentSuiteUUID: null,
-    suiteNames: [suiteName],
-  });
+  // Create root suite for each client
+  const rootSuiteUUIDs = clients.map((client, clientIndex) => {
+    const rootSuiteUUIDs = client.startSuite({
+      testRunUUID: testRunUUIDs[clientIndex],
+      parentSuiteUUID: null,
+      suiteNames: [suiteName],
+    });
 
-  const rootSuiteUUID = Array.isArray(rootSuiteUUIDs) ? rootSuiteUUIDs[0] : rootSuiteUUIDs;
-  
-  suiteCache.set('', rootSuiteUUID);
+    const rootSuiteUUID = Array.isArray(rootSuiteUUIDs) ? rootSuiteUUIDs[0] : rootSuiteUUIDs;
+    
+    suiteCaches[clientIndex].set('', rootSuiteUUID);
+    
+    return rootSuiteUUID;
+  });
 
   executions.forEach((execution) => {
     const request = getRequestFromExecution(execution);
@@ -304,16 +324,6 @@ function main() {
       (request && request.name) ||
       (execution.item && execution.item.name) ||
       'Unnamed request';
-
-    let suiteUUID = rootSuiteUUID;
-    
-    const itemId = execution.item && execution.item.id;
-    if (itemId && itemMap.has(itemId)) {
-      const itemInfo = itemMap.get(itemId);
-      if (itemInfo.path.length > 0) {
-        suiteUUID = getOrCreateSuiteForPath(client, testRunUUID, itemInfo.path, suiteCache);
-      }
-    }
 
     const durationMs = getDurationMs(execution);
 
@@ -326,16 +336,28 @@ function main() {
     const testStart = ZonedDateTime.parse(testStartIso);
     const testEnd = ZonedDateTime.parse(testEndIso);
 
-    const testUUID = client.startTest({
-      testRunUUID,
-      suiteUUID,
-      testName: requestName,
-      testType: 'TEST',
-      description:
-        (request && request.description && request.description.content) ||
-        (request && request.description) ||
-        undefined,
-      startTime: testStart.toString(),
+    const testUUIDs = clients.map((client, clientIndex) => {
+      let suiteUUID = rootSuiteUUIDs[clientIndex];
+      
+      const itemId = execution.item && execution.item.id;
+      if (itemId && itemMap.has(itemId)) {
+        const itemInfo = itemMap.get(itemId);
+        if (itemInfo.path.length > 0) {
+          suiteUUID = getOrCreateSuiteForPath(client, testRunUUIDs[clientIndex], itemInfo.path, suiteCaches[clientIndex]);
+        }
+      }
+
+      return client.startTest({
+        testRunUUID: testRunUUIDs[clientIndex],
+        suiteUUID,
+        testName: requestName,
+        testType: 'TEST',
+        description:
+          (request && request.description && request.description.content) ||
+          (request && request.description) ||
+          undefined,
+        startTime: testStart.toString(),
+      });
     });
 
     // Log request headers and body
@@ -417,17 +439,19 @@ function main() {
         }
       }
 
-      client.log({
-        testRunUUID,
-        testUUID,
-        logTime: testStart.toString(),
-        message,
-        logLevel: 'INFO',
-        logFormat: 'MARKDOWN',
+      clients.forEach((client, clientIndex) => {
+        client.log({
+          testRunUUID: testRunUUIDs[clientIndex],
+          testUUID: testUUIDs[clientIndex],
+          logTime: testStart.toString(),
+          message,
+          logLevel: 'INFO',
+          logFormat: 'MARKDOWN',
+        });
       });
     }
 
-    let testStatus = TestStatus.PASSED;
+    let testStatuses = clients.map(() => TestStatus.PASSED);
     const assertions = getAssertionsFromExecution(execution);
 
     assertions.forEach((assertion) => {
@@ -435,41 +459,43 @@ function main() {
       const stepStart = testStart;
       const stepEnd = testEnd;
 
-      const stepUUID = client.startStep({
-        testRunUUID,
-        testUUID,
-        stepName,
-        startTime: stepStart.toString(),
-      });
+      clients.forEach((client, clientIndex) => {
+        const stepUUID = client.startStep({
+          testRunUUID: testRunUUIDs[clientIndex],
+          testUUID: testUUIDs[clientIndex],
+          stepName,
+          startTime: stepStart.toString(),
+        });
 
-      let stepStatus = TestStatus.PASSED;
-      const error = assertion.error;
-      const status = (assertion.status || '').toLowerCase();
+        let stepStatus = TestStatus.PASSED;
+        const error = assertion.error;
+        const status = (assertion.status || '').toLowerCase();
 
-      if (error || status === 'failed') {
-        stepStatus = TestStatus.FAILED;
-        testStatus = TestStatus.FAILED;
+        if (error || status === 'failed') {
+          stepStatus = TestStatus.FAILED;
+          testStatuses[clientIndex] = TestStatus.FAILED;
 
-        if (error) {
-          logError(client, testRunUUID, testUUID, error, stepEnd, stepUUID);
-        } else {
-          // If no error object but status is failed, log a generic failure message
-          client.log({
-            testRunUUID,
-            testUUID,
-            stepUUID,
-            logTime: stepEnd.toString(),
-            message: 'Assertion failed',
-            logLevel: 'ERROR',
-            logFormat: 'MARKDOWN',
-          });
+          if (error) {
+            logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], error, stepEnd, stepUUID);
+          } else {
+            // If no error object but status is failed, log a generic failure message
+            client.log({
+              testRunUUID: testRunUUIDs[clientIndex],
+              testUUID: testUUIDs[clientIndex],
+              stepUUID,
+              logTime: stepEnd.toString(),
+              message: 'Assertion failed',
+              logLevel: 'ERROR',
+              logFormat: 'MARKDOWN',
+            });
+          }
         }
-      }
 
-      client.finishStep(stepUUID, {
-        testRunUUID,
-        status: stepStatus,
-        endTime: stepEnd.toString(),
+        client.finishStep(stepUUID, {
+          testRunUUID: testRunUUIDs[clientIndex],
+          status: stepStatus,
+          endTime: stepEnd.toString(),
+        });
       });
     });
 
@@ -531,50 +557,62 @@ function main() {
         }
       }
 
-      client.log({
-        testRunUUID,
-        testUUID,
-        logTime: testEnd.toString(),
-        message,
-        logLevel: 'INFO',
-        logFormat: 'MARKDOWN',
+      clients.forEach((client, clientIndex) => {
+        client.log({
+          testRunUUID: testRunUUIDs[clientIndex],
+          testUUID: testUUIDs[clientIndex],
+          logTime: testEnd.toString(),
+          message,
+          logLevel: 'INFO',
+          logFormat: 'MARKDOWN',
+        });
       });
     }
 
     // Handle Newman-style requestError (network/connection errors)
     if (execution.requestError) {
-      testStatus = TestStatus.FAILED;
-      logError(client, testRunUUID, testUUID, execution.requestError, testEnd);
+      clients.forEach((client, clientIndex) => {
+        testStatuses[clientIndex] = TestStatus.FAILED;
+        logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], execution.requestError, testEnd);
+      });
     }
 
     // Handle Newman-style testScript errors (script execution errors)
     if (Array.isArray(execution.testScript)) {
       execution.testScript.forEach((scriptResult) => {
         if (scriptResult.error) {
-          testStatus = TestStatus.FAILED;
-          logError(client, testRunUUID, testUUID, scriptResult.error, testEnd);
+          clients.forEach((client, clientIndex) => {
+            testStatuses[clientIndex] = TestStatus.FAILED;
+            logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], scriptResult.error, testEnd);
+          });
         }
       });
     }
 
     // Top-level execution error, if any
     if (execution.error) {
-      testStatus = TestStatus.FAILED;
-      logError(client, testRunUUID, testUUID, execution.error, testEnd);
+      clients.forEach((client, clientIndex) => {
+        testStatuses[clientIndex] = TestStatus.FAILED;
+        logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], execution.error, testEnd);
+      });
     }
 
     // Handle errors array (from Postman CLI JSON format)
     if (Array.isArray(execution.errors) && execution.errors.length) {
-      testStatus = TestStatus.FAILED;
-      execution.errors.forEach((err) => {
-        logError(client, testRunUUID, testUUID, err, testEnd);
+      clients.forEach((client, clientIndex) => {
+        testStatuses[clientIndex] = TestStatus.FAILED;
+        execution.errors.forEach((err) => {
+          logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], err, testEnd);
+        });
       });
     }
 
-    client.finishTest(testUUID, {
-      testRunUUID,
-      status: testStatus,
-      endTime: testEnd.toString(),
+    clients.forEach((client, clientIndex) => {
+      client.finishTest(testUUIDs[clientIndex], {
+        testRunUUID: testRunUUIDs[clientIndex],
+        status: testStatuses[clientIndex],
+        endTime: testEnd.toString(),
+      });
     });
   });
 
@@ -585,8 +623,10 @@ function main() {
   const runEndIso = new Date(runEndEpochMs).toISOString();
   const runEndZoned = ZonedDateTime.parse(runEndIso);
 
-  client.finishTestRun(testRunUUID, {
-    endTime: runEndZoned.toString(),
+  clients.forEach((client, clientIndex) => {
+    client.finishTestRun(testRunUUIDs[clientIndex], {
+      endTime: runEndZoned.toString(),
+    });
   });
 }
 
