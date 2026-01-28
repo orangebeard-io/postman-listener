@@ -158,3 +158,4 @@ The utility will:
 - Log request and response metadata in Markdown, including headers and JSON/XML bodies in fenced code blocks.
 - Map Postman tests/assertions to Orangebeard steps, attaching error messages and stack traces when they fail.
 - Use the timing information from the report to reconstruct start/end timestamps per test and for the entire run.
+- * Adding attachments requires the files to be in the following format: {pm.info.requestId}_{pm.test.name}.anyextension
