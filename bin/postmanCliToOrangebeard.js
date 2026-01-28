@@ -57,22 +57,6 @@ function getAssertionsFromExecution(execution) {
   return [];
 }
 
-function buildHeadersList(headersLike) {
-  if (!headersLike) return [];
-
-  if (Array.isArray(headersLike)) {
-    return headersLike
-      .filter(Boolean)
-      .map((h) => `${h.key || h.name}: ${h.value}`);
-  }
-
-  if (headersLike.members && Array.isArray(headersLike.members)) {
-    return headersLike.members.map((h) => `${h.key}:${h.value}`);
-  }
-
-  return Object.keys(headersLike).map((k) => `${k}:${headersLike[k]}`);
-}
-
 function getBodyStringFromRequest(req) {
   if (!req || !req.body) return '';
 
@@ -186,8 +170,76 @@ function parseProjects(reporterConfig) {
   return projects.length > 0 ? projects : [''];
 }
 
-function logError(client, testRunUUID, testUUID, error, logTime, stepUUID = undefined) {
-  if (!error) return;
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.txt': 'text/plain',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.pdf': 'application/pdf',
+    '.csv': 'text/csv',
+    '.log': 'text/plain',
+    '.bat': 'text/plain',
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
+}
+
+function findAttachmentFiles(attachmentsPath, requestId, assertionName) {
+  if (!attachmentsPath || !fs.existsSync(attachmentsPath)) {
+    return [];
+  }
+
+  const searchPattern = `${requestId}_${assertionName}`;
+  
+  try {
+    const files = fs.readdirSync(attachmentsPath);
+    const matchingFiles = files.filter((file) => {
+      // Case-insensitive matching: check if filename (without extension) matches the pattern
+      const fileNameWithoutExt = path.parse(file).name;
+      return fileNameWithoutExt.toLowerCase() === searchPattern.toLowerCase();
+    });
+    
+    return matchingFiles.map((file) => path.join(attachmentsPath, file));
+  } catch (err) {
+    console.error(`Error reading attachments directory: ${err.message}`);
+    return [];
+  }
+}
+
+function wrapLongLines(message, maxLineLength = 255) {
+  if (!message) return '';
+  
+  // Split message into lines
+  const lines = message.split('\n');
+  const wrappedLines = [];
+
+  for (let line of lines) {
+    // If line is shorter than max length, keep as is
+    if (line.length <= maxLineLength) {
+      wrappedLines.push(line);
+    } else {
+      // Break long line into chunks of maxLineLength
+      let remainingLine = line;
+      while (remainingLine.length > 0) {
+        wrappedLines.push(remainingLine.substring(0, maxLineLength));
+        remainingLine = remainingLine.substring(maxLineLength);
+      }
+    }
+  }
+
+  return wrappedLines.join('\n');
+}
+
+function buildErrorMessage(error) {
+  if (!error) return 'Unknown error';
 
   let message = '';
   
@@ -210,15 +262,48 @@ function logError(client, testRunUUID, testUUID, error, logTime, stepUUID = unde
 
   // Add error code/errno if available
   if (error.code) {
-    message = `**${error.code}${error.errno ? ` (${error.errno})**` : ''}\n\n${message}`;
+    message = `**${error.code}${error.errno ? ` (${error.errno})` : ''}**\n\n${message}`;
   }
+
+  return message;
+}
+
+function attachFile(client, filePath, testRunUUID, testUUID, stepUUID, logUUID, logTime) {
+  try {
+    const fileContent = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+    const mimeType = getMimeType(filePath);
+
+    client.sendAttachment({
+      file: {
+        name: fileName,
+        content: fileContent,
+        contentType: mimeType,
+      },
+      metaData: {
+        testRunUUID,
+        testUUID,
+        stepUUID,
+        logUUID,
+        attachmentTime: logTime.toString(),
+      },
+    });
+  } catch (err) {
+    console.error(`Failed to attach file ${filePath}: ${err.message}`);
+  }
+}
+
+function logError(client, testRunUUID, testUUID, error, logTime, stepUUID = undefined) {
+  if (!error) return;
+
+  const message = buildErrorMessage(error);
 
   client.log({
     testRunUUID,
     testUUID,
     stepUUID,
     logTime: logTime.toString(),
-    message,
+    message: wrapLongLines(message),
     logLevel: 'ERROR',
     logFormat: 'MARKDOWN',
   });
@@ -229,12 +314,13 @@ function main() {
   const reportPath = args[0];
 
   if (!reportPath) {
-    console.error('Usage: postman-cli-to-orangebeard <path-to-report.json> [--endpoint <url>] [--token <token>] [--testset <name>] [--project <name>] [--attributes <attrs>] [--description <desc>]');
+    console.error('Usage: postman-cli-to-orangebeard <path-to-report.json> [--endpoint <url>] [--token <token>] [--testset <name>] [--project <name>] [--attributes <attrs>] [--description <desc>] [--attachments-path <path>]');
     process.exit(1);
   }
 
   // Parse command-line arguments into a reporterConfig object
   const reporterConfig = {};
+  let attachmentsPath = null;
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '--endpoint' && args[i + 1]) {
       reporterConfig.orangebeardIoOrangebeardEndpoint = args[++i];
@@ -245,9 +331,20 @@ function main() {
     } else if (args[i] === '--project' && args[i + 1]) {
       reporterConfig.orangebeardIoOrangebeardProject = args[++i];
     } else if (args[i] === '--attributes' && args[i + 1]) {
-      reporterConfig.orangebeardIoOrangebeardAttributes = args[++i];
+      const value = args[++i];
+      if (value) {
+        reporterConfig.orangebeardIoOrangebeardAttributes = value;
+      }
     } else if (args[i] === '--description' && args[i + 1]) {
-      reporterConfig.orangebeardIoOrangebeardDescription = args[++i];
+      const value = args[++i];
+      if (value) {
+        reporterConfig.orangebeardIoOrangebeardDescription = value;
+      }
+    } else if (args[i] === '--attachments-path' && args[i + 1]) {
+      const value = args[++i];
+      if (value) {
+        attachmentsPath = path.resolve(value);
+      }
     }
   }
 
@@ -363,7 +460,6 @@ function main() {
     // Log request headers and body
     if (request) {
       const headersArray = request.header || request.headers;
-      const headers = buildHeadersList(headersArray);
       let message = '### Request\n\n';
 
       // Meta section with clear spacing and bullet points
@@ -444,7 +540,7 @@ function main() {
           testRunUUID: testRunUUIDs[clientIndex],
           testUUID: testUUIDs[clientIndex],
           logTime: testStart.toString(),
-          message,
+          message: wrapLongLines(message),
           logLevel: 'INFO',
           logFormat: 'MARKDOWN',
         });
@@ -453,6 +549,9 @@ function main() {
 
     let testStatuses = clients.map(() => TestStatus.PASSED);
     const assertions = getAssertionsFromExecution(execution);
+
+    // Get the request ID for attachment file matching
+    const requestId = execution.id || (execution.item && execution.item.id);
 
     assertions.forEach((assertion) => {
       const stepName = assertion.assertion || assertion.name || 'Assertion';
@@ -471,24 +570,65 @@ function main() {
         const error = assertion.error;
         const status = (assertion.status || '').toLowerCase();
 
+        // Check for attachment files before logging
+        let attachmentFiles = [];
+        if (attachmentsPath && requestId) {
+          attachmentFiles = findAttachmentFiles(attachmentsPath, requestId, stepName);
+        }
+
         if (error || status === 'failed') {
           stepStatus = TestStatus.FAILED;
           testStatuses[clientIndex] = TestStatus.FAILED;
 
           if (error) {
-            logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], error, stepEnd, stepUUID);
-          } else {
-            // If no error object but status is failed, log a generic failure message
-            client.log({
+            const errorMsg = buildErrorMessage(error);
+            
+            const logId = client.log({
               testRunUUID: testRunUUIDs[clientIndex],
               testUUID: testUUIDs[clientIndex],
               stepUUID,
               logTime: stepEnd.toString(),
-              message: 'Assertion failed',
+              message: wrapLongLines(errorMsg),
               logLevel: 'ERROR',
               logFormat: 'MARKDOWN',
             });
+
+            // Attach files to the error log if any exist
+            attachmentFiles.forEach((filePath) => {
+              attachFile(client, filePath, testRunUUIDs[clientIndex], testUUIDs[clientIndex], stepUUID, logId, stepEnd);
+            });
+          } else {
+            // If no error object but status is failed, log a generic failure message
+            const logId = client.log({
+              testRunUUID: testRunUUIDs[clientIndex],
+              testUUID: testUUIDs[clientIndex],
+              stepUUID,
+              logTime: stepEnd.toString(),
+              message: wrapLongLines('Assertion failed'),
+              logLevel: 'ERROR',
+              logFormat: 'MARKDOWN',
+            });
+
+            // Attach files to the failure log if any exist
+            attachmentFiles.forEach((filePath) => {
+              attachFile(client, filePath, testRunUUIDs[clientIndex], testUUIDs[clientIndex], stepUUID, logId, stepEnd);
+            });
           }
+        } else if (attachmentFiles.length > 0) {
+          // Assertion passed but has evidence files - log them at INFO level
+          const logId = client.log({
+            testRunUUID: testRunUUIDs[clientIndex],
+            testUUID: testUUIDs[clientIndex],
+            stepUUID,
+            logTime: stepEnd.toString(),
+            message: wrapLongLines(`Assertion evidence`),
+            logLevel: 'INFO',
+            logFormat: 'PLAIN_TEXT',
+          });
+
+          attachmentFiles.forEach((filePath) => {
+            attachFile(client, filePath, testRunUUIDs[clientIndex], testUUIDs[clientIndex], stepUUID, logId, stepEnd);
+          });
         }
 
         client.finishStep(stepUUID, {
@@ -502,7 +642,6 @@ function main() {
     // Log response headers and body
     if (response) {
       const headersArray = response.header || response.headers;
-      const headers = buildHeadersList(headersArray);
       const bodyStr = getBodyStringFromResponse(response);
 
       let message = '### Response\n\n';
@@ -562,7 +701,7 @@ function main() {
           testRunUUID: testRunUUIDs[clientIndex],
           testUUID: testUUIDs[clientIndex],
           logTime: testEnd.toString(),
-          message,
+          message: wrapLongLines(message),
           logLevel: 'INFO',
           logFormat: 'MARKDOWN',
         });
