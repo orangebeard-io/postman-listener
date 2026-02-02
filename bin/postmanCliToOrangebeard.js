@@ -57,22 +57,6 @@ function getAssertionsFromExecution(execution) {
   return [];
 }
 
-function buildHeadersList(headersLike) {
-  if (!headersLike) return [];
-
-  if (Array.isArray(headersLike)) {
-    return headersLike
-      .filter(Boolean)
-      .map((h) => `${h.key || h.name}: ${h.value}`);
-  }
-
-  if (headersLike.members && Array.isArray(headersLike.members)) {
-    return headersLike.members.map((h) => `${h.key}:${h.value}`);
-  }
-
-  return Object.keys(headersLike).map((k) => `${k}:${headersLike[k]}`);
-}
-
 function getBodyStringFromRequest(req) {
   if (!req || !req.body) return '';
 
@@ -120,13 +104,239 @@ function getBodyStringFromResponse(res) {
   return '';
 }
 
+function buildItemHierarchy(collection) {
+  const itemMap = new Map();
+
+  function traverse(items, parentPath = []) {
+    if (!Array.isArray(items)) return;
+
+    items.forEach((item) => {
+      const itemName = item.name || 'Unnamed';
+
+      if (Array.isArray(item.item) && item.item.length > 0) {
+        const currentPath = [...parentPath, itemName];
+        itemMap.set(item.id, { path: currentPath, isFolder: true });
+        traverse(item.item, currentPath); // Recurse into folder items
+      } else {
+        itemMap.set(item.id, { path: parentPath, isFolder: false });
+      }
+    });
+  }
+
+  if (collection && collection.item) {
+    traverse(collection.item);
+  }
+
+  return itemMap;
+}
+
+function getOrCreateSuiteForPath(client, testRunUUID, path, suiteCache) {
+  if (path.length === 0) return null;
+
+  const pathKey = path.join('/');
+
+  if (suiteCache.has(pathKey)) {
+    return suiteCache.get(pathKey);
+  }
+
+  // Get or create parent suite first
+  const parentPath = path.slice(0, -1);
+  const parentSuiteUUID =
+    parentPath.length > 0
+      ? getOrCreateSuiteForPath(client, testRunUUID, parentPath, suiteCache)
+      : null;
+
+  // Create this suite
+  const suiteUUIDs = client.startSuite({
+    testRunUUID,
+    parentSuiteUUID,
+    suiteNames: [path[path.length - 1]],
+  });
+
+  const suiteUUID = Array.isArray(suiteUUIDs) ? suiteUUIDs[0] : suiteUUIDs;
+  suiteCache.set(pathKey, suiteUUID);
+
+  return suiteUUID;
+}
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.txt': 'text/plain',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.pdf': 'application/pdf',
+    '.csv': 'text/csv',
+    '.log': 'text/plain',
+    '.bat': 'text/plain',
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
+}
+
+function findAttachmentFiles(attachmentsPath, requestId, assertionName) {
+  if (!attachmentsPath || !fs.existsSync(attachmentsPath)) {
+    return [];
+  }
+
+  const searchPattern = `${requestId}_${assertionName}`;
+
+  try {
+    const files = fs.readdirSync(attachmentsPath);
+    const matchingFiles = files.filter((file) => {
+      // Case-insensitive matching: check if filename (without extension) matches the pattern
+      const fileNameWithoutExt = path.parse(file).name;
+      return fileNameWithoutExt.toLowerCase() === searchPattern.toLowerCase();
+    });
+
+    return matchingFiles.map((file) => path.join(attachmentsPath, file));
+  } catch (err) {
+    console.error(`Error reading attachments directory: ${err.message}`);
+    return [];
+  }
+}
+
+function wrapLongLines(message, maxLineLength = 255) {
+  if (!message) return '';
+
+  // Split message into lines
+  const lines = message.split('\n');
+  const wrappedLines = [];
+
+  for (const line of lines) {
+    // If line is shorter than max length, keep as is
+    if (line.length <= maxLineLength) {
+      wrappedLines.push(line);
+    } else {
+      // Break long line into chunks of maxLineLength
+      let remainingLine = line;
+      while (remainingLine.length > 0) {
+        wrappedLines.push(remainingLine.substring(0, maxLineLength));
+        remainingLine = remainingLine.substring(maxLineLength);
+      }
+    }
+  }
+
+  return wrappedLines.join('\n');
+}
+
+function buildErrorMessage(error) {
+  if (!error) return 'Unknown error';
+
+  let message = '';
+
+  // Handle different error formats
+  if (error.type && error.name) {
+    message = `${error.type}: ${error.name}`;
+    if (error.message) {
+      message += ` - ${error.message}`;
+    }
+  } else if (error.message) {
+    message = error.message;
+  } else {
+    message = 'Unknown error';
+  }
+
+  // Add error source context if available
+  if (error.source) {
+    message = `**${error.source}**\n\n${message}`;
+  }
+
+  // Add error code/errno if available
+  if (error.code) {
+    message = `**${error.code}${error.errno ? ` (${error.errno})` : ''}**\n\n${message}`;
+  }
+
+  return message;
+}
+
+function attachFile(client, filePath, testRunUUID, testUUID, stepUUID, logUUID, logTime) {
+  try {
+    const fileContent = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+    const mimeType = getMimeType(filePath);
+
+    client.sendAttachment({
+      file: {
+        name: fileName,
+        content: fileContent,
+        contentType: mimeType,
+      },
+      metaData: {
+        testRunUUID,
+        testUUID,
+        stepUUID,
+        logUUID,
+        attachmentTime: logTime.toString(),
+      },
+    });
+  } catch (err) {
+    console.error(`Failed to attach file ${filePath}: ${err.message}`);
+  }
+}
+
+function logError(client, testRunUUID, testUUID, error, logTime, stepUUID = undefined) {
+  if (!error) return;
+
+  const message = buildErrorMessage(error);
+
+  client.log({
+    testRunUUID,
+    testUUID,
+    stepUUID,
+    logTime: logTime.toString(),
+    message: wrapLongLines(message),
+    logLevel: 'ERROR',
+    logFormat: 'MARKDOWN',
+  });
+}
+
 function main() {
-  const reportPath = process.argv[2];
+  const args = process.argv.slice(2);
+  const reportPath = args[0];
 
   if (!reportPath) {
-    // Keep usage simple; extra options can be added later if needed.
-    console.error('Usage: postman-cli-to-orangebeard <path-to-report.json>');
+    console.error(
+      'Usage: postman-cli-to-orangebeard <path-to-report.json> [--endpoint <url>] [--token <token>] [--testset <name>] [--project <name>] [--attributes <attrs>] [--description <desc>] [--attachments-path <path>]',
+    );
     process.exit(1);
+  }
+
+  // Parse command-line arguments into a reporterConfig object
+  const reporterConfig = {};
+  let attachmentsPath = null;
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--endpoint' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardEndpoint = args[++i];
+    } else if (args[i] === '--token' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardToken = args[++i];
+    } else if (args[i] === '--testset' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardTestset = args[++i];
+    } else if (args[i] === '--project' && args[i + 1]) {
+      reporterConfig.orangebeardIoOrangebeardProject = args[++i];
+    } else if (args[i] === '--attributes' && args[i + 1]) {
+      const value = args[++i];
+      if (value) {
+        reporterConfig.orangebeardIoOrangebeardAttributes = value;
+      }
+    } else if (args[i] === '--description' && args[i + 1]) {
+      const value = args[++i];
+      if (value) {
+        reporterConfig.orangebeardIoOrangebeardDescription = value;
+      }
+    } else if (args[i] === '--attachments-path' && args[i + 1]) {
+      const value = args[++i];
+      if (value) {
+        attachmentsPath = path.resolve(value);
+      }
+    }
   }
 
   const absolutePath = path.resolve(process.cwd(), reportPath);
@@ -140,15 +350,24 @@ function main() {
     process.exit(1);
   }
 
-  const client = new OrangebeardAsyncV3Client();
-  const orangebeardConfig = client.config || {};
+  const projects = utils.parseProjects(reporterConfig);
+
+  const clients = projects.map((project) => {
+    const config = !Object.keys(reporterConfig).length
+      ? {}
+      : { ...utils.getOrangebeardParameters(reporterConfig), project };
+    return !Object.keys(config).length
+      ? new OrangebeardAsyncV3Client()
+      : new OrangebeardAsyncV3Client(config);
+  });
+
+  const orangebeardConfig = clients[0].config || {};
 
   const meta = run.meta || {};
 
   // Base time for the run and first test; other timestamps are derived from durations.
   // Prefer the Postman CLI "meta.started" timestamp when available (epoch millis).
-  const runStartEpochMs =
-    typeof meta.started === 'number' ? meta.started : Date.now();
+  const runStartEpochMs = typeof meta.started === 'number' ? meta.started : Date.now();
   let currentOffsetMs = 0;
 
   const runStartIso = new Date(runStartEpochMs).toISOString();
@@ -157,7 +376,7 @@ function main() {
   const startTestRunPayload = utils.getStartTestRun(orangebeardConfig);
   startTestRunPayload.startTime = runStartZoned.toString();
 
-  const testRunUUID = client.startTestRun(startTestRunPayload);
+  const testRunUUIDs = clients.map((client) => client.startTestRun(startTestRunPayload));
 
   const suiteName =
     meta.collectionName ||
@@ -165,29 +384,33 @@ function main() {
     (run.collection && run.collection.info && run.collection.info.name) ||
     'Postman CLI run';
 
-  const suiteUUIDs = client.startSuite({
-    testRunUUID,
-    parentSuiteUUID: null,
-    suiteNames: [suiteName],
-  });
+  // Build item hierarchy if collection structure is available
+  const itemMap = buildItemHierarchy(json.collection);
+  const suiteCaches = clients.map(() => new Map());
 
-  const suiteUUID = Array.isArray(suiteUUIDs) ? suiteUUIDs[0] : suiteUUIDs;
+  // Create root suite for each client
+  const rootSuiteUUIDs = clients.map((client, clientIndex) => {
+    const rootSuiteUUIDs = client.startSuite({
+      testRunUUID: testRunUUIDs[clientIndex],
+      parentSuiteUUID: null,
+      suiteNames: [suiteName],
+    });
+
+    const rootSuiteUUID = Array.isArray(rootSuiteUUIDs) ? rootSuiteUUIDs[0] : rootSuiteUUIDs;
+
+    suiteCaches[clientIndex].set('', rootSuiteUUID);
+
+    return rootSuiteUUID;
+  });
 
   executions.forEach((execution) => {
     const request = getRequestFromExecution(execution);
     const response = getResponseFromExecution(execution);
 
     const requestName =
-      (request && request.name) ||
-      (execution.item && execution.item.name) ||
-      'Unnamed request';
+      (request && request.name) || (execution.item && execution.item.name) || 'Unnamed request';
 
     const durationMs = getDurationMs(execution);
-
-    const testAttributes = [];
-    if (request && request.method) {
-      testAttributes.push({ key: 'Method', value: request.method });
-    }
 
     const testStartEpochMs = runStartEpochMs + currentOffsetMs;
     const testEndEpochMs = testStartEpochMs + durationMs;
@@ -198,23 +421,38 @@ function main() {
     const testStart = ZonedDateTime.parse(testStartIso);
     const testEnd = ZonedDateTime.parse(testEndIso);
 
-    const testUUID = client.startTest({
-      testRunUUID,
-      suiteUUID,
-      testName: requestName,
-      testType: 'TEST',
-      description:
-        (request && request.description && request.description.content) ||
-        (request && request.description) ||
-        undefined,
-      attributes: testAttributes,
-      startTime: testStart.toString(),
+    const testUUIDs = clients.map((client, clientIndex) => {
+      let suiteUUID = rootSuiteUUIDs[clientIndex];
+
+      const itemId = execution.item && execution.item.id;
+      if (itemId && itemMap.has(itemId)) {
+        const itemInfo = itemMap.get(itemId);
+        if (itemInfo.path.length > 0) {
+          suiteUUID = getOrCreateSuiteForPath(
+            client,
+            testRunUUIDs[clientIndex],
+            itemInfo.path,
+            suiteCaches[clientIndex],
+          );
+        }
+      }
+
+      return client.startTest({
+        testRunUUID: testRunUUIDs[clientIndex],
+        suiteUUID,
+        testName: requestName,
+        testType: 'TEST',
+        description:
+          (request && request.description && request.description.content) ||
+          (request && request.description) ||
+          undefined,
+        startTime: testStart.toString(),
+      });
     });
 
     // Log request headers and body
     if (request) {
       const headersArray = request.header || request.headers;
-      const headers = buildHeadersList(headersArray);
       let message = '### Request\n\n';
 
       // Meta section with clear spacing and bullet points
@@ -229,7 +467,9 @@ function main() {
           const protocol = urlObj.protocol ? `${urlObj.protocol}://` : '';
           const host = Array.isArray(urlObj.host) ? urlObj.host.join('.') : urlObj.host || '';
           const port = urlObj.port ? `:${urlObj.port}` : '';
-          const pathSegments = Array.isArray(urlObj.path) ? urlObj.path.join('/') : urlObj.path || '';
+          const pathSegments = Array.isArray(urlObj.path)
+            ? urlObj.path.join('/')
+            : urlObj.path || '';
           const path = pathSegments ? `/${pathSegments}` : '';
           url = `${protocol}${host}${port}${path}`;
         }
@@ -290,70 +530,137 @@ function main() {
         }
       }
 
-      client.log({
-        testRunUUID,
-        testUUID,
-        logTime: testStart.toString(),
-        message,
-        logLevel: 'INFO',
-        logFormat: 'MARKDOWN',
+      clients.forEach((client, clientIndex) => {
+        client.log({
+          testRunUUID: testRunUUIDs[clientIndex],
+          testUUID: testUUIDs[clientIndex],
+          logTime: testStart.toString(),
+          message: wrapLongLines(message),
+          logLevel: 'INFO',
+          logFormat: 'MARKDOWN',
+        });
       });
     }
 
-    let testStatus = TestStatus.PASSED;
+    const testStatuses = clients.map(() => TestStatus.PASSED);
     const assertions = getAssertionsFromExecution(execution);
+
+    // Get the request ID for attachment file matching
+    const requestId = execution.id || (execution.item && execution.item.id);
 
     assertions.forEach((assertion) => {
       const stepName = assertion.assertion || assertion.name || 'Assertion';
       const stepStart = testStart;
       const stepEnd = testEnd;
 
-      const stepUUID = client.startStep({
-        testRunUUID,
-        testUUID,
-        stepName,
-        startTime: stepStart.toString(),
-      });
+      clients.forEach((client, clientIndex) => {
+        const stepUUID = client.startStep({
+          testRunUUID: testRunUUIDs[clientIndex],
+          testUUID: testUUIDs[clientIndex],
+          stepName,
+          startTime: stepStart.toString(),
+        });
 
-      let stepStatus = TestStatus.PASSED;
-      const error = assertion.error;
-      const status = (assertion.status || '').toLowerCase();
+        let stepStatus = TestStatus.PASSED;
+        const error = assertion.error;
+        const status = (assertion.status || '').toLowerCase();
 
-      if (error || status === 'failed') {
-        stepStatus = TestStatus.FAILED;
-        testStatus = TestStatus.FAILED;
-
-        let message = (error && error.message) || 'Assertion failed';
-        const stackLines = error && Array.isArray(error.stacktrace) ? error.stacktrace : [];
-
-        if (error && error.stack) {
-          message += `\n${error.stack}`;
-        } else if (stackLines.length) {
-          message += `\n${stackLines.map((l) => `    ${l}`).join('\n')}`;
+        // Check for attachment files before logging
+        let attachmentFiles = [];
+        if (attachmentsPath && requestId) {
+          attachmentFiles = findAttachmentFiles(attachmentsPath, requestId, stepName);
         }
 
-        client.log({
-          testRunUUID,
-          testUUID,
-          stepUUID,
-          logTime: stepEnd.toString(),
-          message,
-          logLevel: 'ERROR',
-          logFormat: 'MARKDOWN',
-        });
-      }
+        if (error || status === 'failed') {
+          stepStatus = TestStatus.FAILED;
+          testStatuses[clientIndex] = TestStatus.FAILED;
 
-      client.finishStep(stepUUID, {
-        testRunUUID,
-        status: stepStatus,
-        endTime: stepEnd.toString(),
+          if (error) {
+            const errorMsg = buildErrorMessage(error);
+
+            const logId = client.log({
+              testRunUUID: testRunUUIDs[clientIndex],
+              testUUID: testUUIDs[clientIndex],
+              stepUUID,
+              logTime: stepEnd.toString(),
+              message: wrapLongLines(errorMsg),
+              logLevel: 'ERROR',
+              logFormat: 'MARKDOWN',
+            });
+
+            // Attach files to the error log if any exist
+            attachmentFiles.forEach((filePath) => {
+              attachFile(
+                client,
+                filePath,
+                testRunUUIDs[clientIndex],
+                testUUIDs[clientIndex],
+                stepUUID,
+                logId,
+                stepEnd,
+              );
+            });
+          } else {
+            // If no error object but status is failed, log a generic failure message
+            const logId = client.log({
+              testRunUUID: testRunUUIDs[clientIndex],
+              testUUID: testUUIDs[clientIndex],
+              stepUUID,
+              logTime: stepEnd.toString(),
+              message: wrapLongLines('Assertion failed'),
+              logLevel: 'ERROR',
+              logFormat: 'MARKDOWN',
+            });
+
+            // Attach files to the failure log if any exist
+            attachmentFiles.forEach((filePath) => {
+              attachFile(
+                client,
+                filePath,
+                testRunUUIDs[clientIndex],
+                testUUIDs[clientIndex],
+                stepUUID,
+                logId,
+                stepEnd,
+              );
+            });
+          }
+        } else if (attachmentFiles.length > 0) {
+          // Assertion passed but has evidence files - log them at INFO level
+          const logId = client.log({
+            testRunUUID: testRunUUIDs[clientIndex],
+            testUUID: testUUIDs[clientIndex],
+            stepUUID,
+            logTime: stepEnd.toString(),
+            message: wrapLongLines(`Assertion evidence`),
+            logLevel: 'INFO',
+            logFormat: 'PLAIN_TEXT',
+          });
+
+          attachmentFiles.forEach((filePath) => {
+            attachFile(
+              client,
+              filePath,
+              testRunUUIDs[clientIndex],
+              testUUIDs[clientIndex],
+              stepUUID,
+              logId,
+              stepEnd,
+            );
+          });
+        }
+
+        client.finishStep(stepUUID, {
+          testRunUUID: testRunUUIDs[clientIndex],
+          status: stepStatus,
+          endTime: stepEnd.toString(),
+        });
       });
     });
 
     // Log response headers and body
     if (response) {
       const headersArray = response.header || response.headers;
-      const headers = buildHeadersList(headersArray);
       const bodyStr = getBodyStringFromResponse(response);
 
       let message = '### Response\n\n';
@@ -408,70 +715,92 @@ function main() {
         }
       }
 
-      client.log({
-        testRunUUID,
-        testUUID,
-        logTime: testEnd.toString(),
-        message,
-        logLevel: 'INFO',
-        logFormat: 'MARKDOWN',
-      });
-    }
-
-    // Top-level execution error, if any
-    if (execution.error) {
-      testStatus = TestStatus.FAILED;
-      const err = execution.error;
-      let message = err.message || 'Request execution failed';
-
-      if (err.stack) {
-        message += `\n${err.stack}`;
-      }
-
-      client.log({
-        testRunUUID,
-        testUUID,
-        logTime: testEnd.toString(),
-        message,
-        logLevel: 'ERROR',
-        logFormat: 'MARKDOWN',
-      });
-    }
-
-    if (Array.isArray(execution.errors) && execution.errors.length) {
-      testStatus = TestStatus.FAILED;
-      execution.errors.forEach((err) => {
-        let message = (err && err.message) || 'Request execution error';
-        if (err && err.stack) {
-          message += `\n${err.stack}`;
-        }
+      clients.forEach((client, clientIndex) => {
         client.log({
-          testRunUUID,
-          testUUID,
+          testRunUUID: testRunUUIDs[clientIndex],
+          testUUID: testUUIDs[clientIndex],
           logTime: testEnd.toString(),
-          message,
-          logLevel: 'ERROR',
+          message: wrapLongLines(message),
+          logLevel: 'INFO',
           logFormat: 'MARKDOWN',
         });
       });
     }
 
-    client.finishTest(testUUID, {
-      testRunUUID,
-      status: testStatus,
-      endTime: testEnd.toString(),
+    // Handle Newman-style requestError (network/connection errors)
+    if (execution.requestError) {
+      clients.forEach((client, clientIndex) => {
+        testStatuses[clientIndex] = TestStatus.FAILED;
+        logError(
+          client,
+          testRunUUIDs[clientIndex],
+          testUUIDs[clientIndex],
+          execution.requestError,
+          testEnd,
+        );
+      });
+    }
+
+    // Handle Newman-style testScript errors (script execution errors)
+    if (Array.isArray(execution.testScript)) {
+      execution.testScript.forEach((scriptResult) => {
+        if (scriptResult.error) {
+          clients.forEach((client, clientIndex) => {
+            testStatuses[clientIndex] = TestStatus.FAILED;
+            logError(
+              client,
+              testRunUUIDs[clientIndex],
+              testUUIDs[clientIndex],
+              scriptResult.error,
+              testEnd,
+            );
+          });
+        }
+      });
+    }
+
+    // Top-level execution error, if any
+    if (execution.error) {
+      clients.forEach((client, clientIndex) => {
+        testStatuses[clientIndex] = TestStatus.FAILED;
+        logError(
+          client,
+          testRunUUIDs[clientIndex],
+          testUUIDs[clientIndex],
+          execution.error,
+          testEnd,
+        );
+      });
+    }
+
+    // Handle errors array (from Postman CLI JSON format)
+    if (Array.isArray(execution.errors) && execution.errors.length) {
+      clients.forEach((client, clientIndex) => {
+        testStatuses[clientIndex] = TestStatus.FAILED;
+        execution.errors.forEach((err) => {
+          logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], err, testEnd);
+        });
+      });
+    }
+
+    clients.forEach((client, clientIndex) => {
+      client.finishTest(testUUIDs[clientIndex], {
+        testRunUUID: testRunUUIDs[clientIndex],
+        status: testStatuses[clientIndex],
+        endTime: testEnd.toString(),
+      });
     });
   });
 
   const runEndEpochMs =
-    typeof meta.completed === 'number'
-      ? meta.completed
-      : runStartEpochMs + currentOffsetMs;
+    typeof meta.completed === 'number' ? meta.completed : runStartEpochMs + currentOffsetMs;
   const runEndIso = new Date(runEndEpochMs).toISOString();
   const runEndZoned = ZonedDateTime.parse(runEndIso);
 
-  client.finishTestRun(testRunUUID, {
-    endTime: runEndZoned.toString(),
+  clients.forEach((client, clientIndex) => {
+    client.finishTestRun(testRunUUIDs[clientIndex], {
+      endTime: runEndZoned.toString(),
+    });
   });
 }
 

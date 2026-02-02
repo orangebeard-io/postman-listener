@@ -139,10 +139,23 @@ Or, if the package is installed globally or as a project dependency:
 postman-cli-to-orangebeard ./example_pm_collection/postman-cli-reports/VAmPI-report.json
 ```
 
+The utility also works with the following arguments:
+```shell
+postman-cli-to-orangebeard ./example_pm_collection/postman-cli-reports/VAmPI-report.json \
+--endpoint=https://my.orangebeard.app \
+--token=00000000-0000-0000-00000000 \
+--testset=testset_name \
+--project=project_name \
+--description=description \
+--attributes=key:value;secondkey:secondvalue;singleTag \
+--attachments-path=path_to_attachments
+```
+
 The utility will:
 
-- Create an Orangebeard test run using the same automatic configuration logic as the Newman reporter.
-- Create one Orangebeard test per request in the JSON report.
+- Create an Orangebeard test run in either Postman or Newman style, which is automatically detected by the reporter.
+- Create one Orangebeard test per request in the JSON report and in case of Newman it will also copy the folder structure.
 - Log request and response metadata in Markdown, including headers and JSON/XML bodies in fenced code blocks.
 - Map Postman tests/assertions to Orangebeard steps, attaching error messages and stack traces when they fail.
 - Use the timing information from the report to reconstruct start/end timestamps per test and for the entire run.
+- * Adding attachments requires the files to be in the following format: {pm.info.requestId}_{pm.test.name}.anyextension
