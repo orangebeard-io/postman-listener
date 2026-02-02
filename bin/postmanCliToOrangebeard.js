@@ -106,13 +106,13 @@ function getBodyStringFromResponse(res) {
 
 function buildItemHierarchy(collection) {
   const itemMap = new Map();
-  
+
   function traverse(items, parentPath = []) {
     if (!Array.isArray(items)) return;
-    
+
     items.forEach((item) => {
       const itemName = item.name || 'Unnamed';
-      
+
       if (Array.isArray(item.item) && item.item.length > 0) {
         const currentPath = [...parentPath, itemName];
         itemMap.set(item.id, { path: currentPath, isFolder: true });
@@ -122,52 +122,41 @@ function buildItemHierarchy(collection) {
       }
     });
   }
-  
+
   if (collection && collection.item) {
     traverse(collection.item);
   }
-  
+
   return itemMap;
 }
 
 function getOrCreateSuiteForPath(client, testRunUUID, path, suiteCache) {
   if (path.length === 0) return null;
-  
+
   const pathKey = path.join('/');
-  
+
   if (suiteCache.has(pathKey)) {
     return suiteCache.get(pathKey);
   }
-  
+
   // Get or create parent suite first
   const parentPath = path.slice(0, -1);
-  const parentSuiteUUID = parentPath.length > 0 
-    ? getOrCreateSuiteForPath(client, testRunUUID, parentPath, suiteCache)
-    : null;
-  
+  const parentSuiteUUID =
+    parentPath.length > 0
+      ? getOrCreateSuiteForPath(client, testRunUUID, parentPath, suiteCache)
+      : null;
+
   // Create this suite
   const suiteUUIDs = client.startSuite({
     testRunUUID,
     parentSuiteUUID,
     suiteNames: [path[path.length - 1]],
   });
-  
+
   const suiteUUID = Array.isArray(suiteUUIDs) ? suiteUUIDs[0] : suiteUUIDs;
   suiteCache.set(pathKey, suiteUUID);
-  
-  return suiteUUID;
-}
 
-function parseProjects(reporterConfig) {
-  if (!Object.keys(reporterConfig).length) {
-    return [''];
-  }
-  const projectString = reporterConfig.orangebeardIoOrangebeardProject;
-  if (!projectString) {
-    return [''];
-  }
-  const projects = projectString.split(';').map(p => p.trim()).filter(p => p.length > 0);
-  return projects.length > 0 ? projects : [''];
+  return suiteUUID;
 }
 
 function getMimeType(filePath) {
@@ -198,7 +187,7 @@ function findAttachmentFiles(attachmentsPath, requestId, assertionName) {
   }
 
   const searchPattern = `${requestId}_${assertionName}`;
-  
+
   try {
     const files = fs.readdirSync(attachmentsPath);
     const matchingFiles = files.filter((file) => {
@@ -206,7 +195,7 @@ function findAttachmentFiles(attachmentsPath, requestId, assertionName) {
       const fileNameWithoutExt = path.parse(file).name;
       return fileNameWithoutExt.toLowerCase() === searchPattern.toLowerCase();
     });
-    
+
     return matchingFiles.map((file) => path.join(attachmentsPath, file));
   } catch (err) {
     console.error(`Error reading attachments directory: ${err.message}`);
@@ -216,12 +205,12 @@ function findAttachmentFiles(attachmentsPath, requestId, assertionName) {
 
 function wrapLongLines(message, maxLineLength = 255) {
   if (!message) return '';
-  
+
   // Split message into lines
   const lines = message.split('\n');
   const wrappedLines = [];
 
-  for (let line of lines) {
+  for (const line of lines) {
     // If line is shorter than max length, keep as is
     if (line.length <= maxLineLength) {
       wrappedLines.push(line);
@@ -242,7 +231,7 @@ function buildErrorMessage(error) {
   if (!error) return 'Unknown error';
 
   let message = '';
-  
+
   // Handle different error formats
   if (error.type && error.name) {
     message = `${error.type}: ${error.name}`;
@@ -314,7 +303,9 @@ function main() {
   const reportPath = args[0];
 
   if (!reportPath) {
-    console.error('Usage: postman-cli-to-orangebeard <path-to-report.json> [--endpoint <url>] [--token <token>] [--testset <name>] [--project <name>] [--attributes <attrs>] [--description <desc>] [--attachments-path <path>]');
+    console.error(
+      'Usage: postman-cli-to-orangebeard <path-to-report.json> [--endpoint <url>] [--token <token>] [--testset <name>] [--project <name>] [--attributes <attrs>] [--description <desc>] [--attachments-path <path>]',
+    );
     process.exit(1);
   }
 
@@ -359,9 +350,9 @@ function main() {
     process.exit(1);
   }
 
-  const projects = parseProjects(reporterConfig);
-  
-  const clients = projects.map(project => {
+  const projects = utils.parseProjects(reporterConfig);
+
+  const clients = projects.map((project) => {
     const config = !Object.keys(reporterConfig).length
       ? {}
       : { ...utils.getOrangebeardParameters(reporterConfig), project };
@@ -369,15 +360,14 @@ function main() {
       ? new OrangebeardAsyncV3Client()
       : new OrangebeardAsyncV3Client(config);
   });
-  
+
   const orangebeardConfig = clients[0].config || {};
 
   const meta = run.meta || {};
 
   // Base time for the run and first test; other timestamps are derived from durations.
   // Prefer the Postman CLI "meta.started" timestamp when available (epoch millis).
-  const runStartEpochMs =
-    typeof meta.started === 'number' ? meta.started : Date.now();
+  const runStartEpochMs = typeof meta.started === 'number' ? meta.started : Date.now();
   let currentOffsetMs = 0;
 
   const runStartIso = new Date(runStartEpochMs).toISOString();
@@ -386,7 +376,7 @@ function main() {
   const startTestRunPayload = utils.getStartTestRun(orangebeardConfig);
   startTestRunPayload.startTime = runStartZoned.toString();
 
-  const testRunUUIDs = clients.map(client => client.startTestRun(startTestRunPayload));
+  const testRunUUIDs = clients.map((client) => client.startTestRun(startTestRunPayload));
 
   const suiteName =
     meta.collectionName ||
@@ -397,7 +387,7 @@ function main() {
   // Build item hierarchy if collection structure is available
   const itemMap = buildItemHierarchy(json.collection);
   const suiteCaches = clients.map(() => new Map());
-  
+
   // Create root suite for each client
   const rootSuiteUUIDs = clients.map((client, clientIndex) => {
     const rootSuiteUUIDs = client.startSuite({
@@ -407,9 +397,9 @@ function main() {
     });
 
     const rootSuiteUUID = Array.isArray(rootSuiteUUIDs) ? rootSuiteUUIDs[0] : rootSuiteUUIDs;
-    
+
     suiteCaches[clientIndex].set('', rootSuiteUUID);
-    
+
     return rootSuiteUUID;
   });
 
@@ -418,9 +408,7 @@ function main() {
     const response = getResponseFromExecution(execution);
 
     const requestName =
-      (request && request.name) ||
-      (execution.item && execution.item.name) ||
-      'Unnamed request';
+      (request && request.name) || (execution.item && execution.item.name) || 'Unnamed request';
 
     const durationMs = getDurationMs(execution);
 
@@ -435,12 +423,17 @@ function main() {
 
     const testUUIDs = clients.map((client, clientIndex) => {
       let suiteUUID = rootSuiteUUIDs[clientIndex];
-      
+
       const itemId = execution.item && execution.item.id;
       if (itemId && itemMap.has(itemId)) {
         const itemInfo = itemMap.get(itemId);
         if (itemInfo.path.length > 0) {
-          suiteUUID = getOrCreateSuiteForPath(client, testRunUUIDs[clientIndex], itemInfo.path, suiteCaches[clientIndex]);
+          suiteUUID = getOrCreateSuiteForPath(
+            client,
+            testRunUUIDs[clientIndex],
+            itemInfo.path,
+            suiteCaches[clientIndex],
+          );
         }
       }
 
@@ -474,7 +467,9 @@ function main() {
           const protocol = urlObj.protocol ? `${urlObj.protocol}://` : '';
           const host = Array.isArray(urlObj.host) ? urlObj.host.join('.') : urlObj.host || '';
           const port = urlObj.port ? `:${urlObj.port}` : '';
-          const pathSegments = Array.isArray(urlObj.path) ? urlObj.path.join('/') : urlObj.path || '';
+          const pathSegments = Array.isArray(urlObj.path)
+            ? urlObj.path.join('/')
+            : urlObj.path || '';
           const path = pathSegments ? `/${pathSegments}` : '';
           url = `${protocol}${host}${port}${path}`;
         }
@@ -547,7 +542,7 @@ function main() {
       });
     }
 
-    let testStatuses = clients.map(() => TestStatus.PASSED);
+    const testStatuses = clients.map(() => TestStatus.PASSED);
     const assertions = getAssertionsFromExecution(execution);
 
     // Get the request ID for attachment file matching
@@ -582,7 +577,7 @@ function main() {
 
           if (error) {
             const errorMsg = buildErrorMessage(error);
-            
+
             const logId = client.log({
               testRunUUID: testRunUUIDs[clientIndex],
               testUUID: testUUIDs[clientIndex],
@@ -595,7 +590,15 @@ function main() {
 
             // Attach files to the error log if any exist
             attachmentFiles.forEach((filePath) => {
-              attachFile(client, filePath, testRunUUIDs[clientIndex], testUUIDs[clientIndex], stepUUID, logId, stepEnd);
+              attachFile(
+                client,
+                filePath,
+                testRunUUIDs[clientIndex],
+                testUUIDs[clientIndex],
+                stepUUID,
+                logId,
+                stepEnd,
+              );
             });
           } else {
             // If no error object but status is failed, log a generic failure message
@@ -611,7 +614,15 @@ function main() {
 
             // Attach files to the failure log if any exist
             attachmentFiles.forEach((filePath) => {
-              attachFile(client, filePath, testRunUUIDs[clientIndex], testUUIDs[clientIndex], stepUUID, logId, stepEnd);
+              attachFile(
+                client,
+                filePath,
+                testRunUUIDs[clientIndex],
+                testUUIDs[clientIndex],
+                stepUUID,
+                logId,
+                stepEnd,
+              );
             });
           }
         } else if (attachmentFiles.length > 0) {
@@ -627,7 +638,15 @@ function main() {
           });
 
           attachmentFiles.forEach((filePath) => {
-            attachFile(client, filePath, testRunUUIDs[clientIndex], testUUIDs[clientIndex], stepUUID, logId, stepEnd);
+            attachFile(
+              client,
+              filePath,
+              testRunUUIDs[clientIndex],
+              testUUIDs[clientIndex],
+              stepUUID,
+              logId,
+              stepEnd,
+            );
           });
         }
 
@@ -712,7 +731,13 @@ function main() {
     if (execution.requestError) {
       clients.forEach((client, clientIndex) => {
         testStatuses[clientIndex] = TestStatus.FAILED;
-        logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], execution.requestError, testEnd);
+        logError(
+          client,
+          testRunUUIDs[clientIndex],
+          testUUIDs[clientIndex],
+          execution.requestError,
+          testEnd,
+        );
       });
     }
 
@@ -722,7 +747,13 @@ function main() {
         if (scriptResult.error) {
           clients.forEach((client, clientIndex) => {
             testStatuses[clientIndex] = TestStatus.FAILED;
-            logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], scriptResult.error, testEnd);
+            logError(
+              client,
+              testRunUUIDs[clientIndex],
+              testUUIDs[clientIndex],
+              scriptResult.error,
+              testEnd,
+            );
           });
         }
       });
@@ -732,7 +763,13 @@ function main() {
     if (execution.error) {
       clients.forEach((client, clientIndex) => {
         testStatuses[clientIndex] = TestStatus.FAILED;
-        logError(client, testRunUUIDs[clientIndex], testUUIDs[clientIndex], execution.error, testEnd);
+        logError(
+          client,
+          testRunUUIDs[clientIndex],
+          testUUIDs[clientIndex],
+          execution.error,
+          testEnd,
+        );
       });
     }
 
@@ -756,9 +793,7 @@ function main() {
   });
 
   const runEndEpochMs =
-    typeof meta.completed === 'number'
-      ? meta.completed
-      : runStartEpochMs + currentOffsetMs;
+    typeof meta.completed === 'number' ? meta.completed : runStartEpochMs + currentOffsetMs;
   const runEndIso = new Date(runEndEpochMs).toISOString();
   const runEndZoned = ZonedDateTime.parse(runEndIso);
 
